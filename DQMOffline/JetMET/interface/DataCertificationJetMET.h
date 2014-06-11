@@ -17,30 +17,21 @@
 #include "FWCore/Framework/interface/MakerMacros.h"
 
 #include "FWCore/ParameterSet/interface/ParameterSet.h"
-#include "DQMServices/Core/interface/DQMStore.h"
 #include "DQMServices/Core/interface/MonitorElement.h"
 #include "FWCore/ServiceRegistry/interface/Service.h"
 #include "CommonTools/UtilAlgos/interface/TFileService.h"
-#include "DQMServices/Core/interface/DQMEDAnalyzer.h"
+#include "DQMServices/Core/interface/DQMEDHarvester.h"
 //
 // class decleration
 //
 
-class DataCertificationJetMET : public DQMEDAnalyzer {
+class DataCertificationJetMET : public DQMEDHarvester {
    public:
       explicit DataCertificationJetMET(const edm::ParameterSet&);
       ~DataCertificationJetMET();
 
    private:
-      virtual void beginJob(void) ;
-      virtual void analyze(const edm::Event&, const edm::EventSetup&);
-      virtual void endJob() ;
-
-      void bookHistograms(DQMStore::IBooker &, edm::Run const &, edm::EventSetup const &) override;
-      virtual void endRun(const edm::Run&, const edm::EventSetup&) ;
-
-      virtual void beginLuminosityBlock(const edm::LuminosityBlock&, const edm::EventSetup&);
-      virtual void endLuminosityBlock(const edm::LuminosityBlock&, const edm::EventSetup&);
+      virtual void dqmEndJob(DQMStore::IBooker &, DQMStore::IGetter &) ;
 
       MonitorElement*  reportSummary;
       MonitorElement*  CertificationSummary;
@@ -50,7 +41,6 @@ class DataCertificationJetMET : public DQMEDAnalyzer {
    // ----------member data ---------------------------
 
    edm::ParameterSet conf_;
-   DQMStore * dbe_;
    edm::Service<TFileService> fs_;
    int verbose_;
    bool InMemory_;

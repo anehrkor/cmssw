@@ -85,7 +85,6 @@ private:
 
   const edm::RunNumber_t runNumber_;
 
-  const std::string buInputDir_;
   const std::string fuOutputDir_;
 
   const edm::DaqProvenanceHelper daqProvenanceHelper_;
@@ -191,7 +190,7 @@ private:
   std::mutex mReader_;
   std::vector<std::condition_variable*> cvReader_;
 
-  bool quit_threads_=false;
+  std::atomic<bool> quit_threads_;
   std::vector<bool> thread_quit_signal;
   bool setExceptionState_ = false;
   std::mutex startupLock_;

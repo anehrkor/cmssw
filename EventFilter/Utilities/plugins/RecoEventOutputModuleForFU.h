@@ -16,6 +16,7 @@
 #include "EventFilter/Utilities/interface/FileIO.h"
 #include "EventFilter/Utilities/plugins/FastMonitoringService.h"
 
+
 namespace evf {
   template<typename Consumer>
   class RecoEventOutputModuleForFU : public edm::StreamerOutputModuleBase {
@@ -46,9 +47,9 @@ namespace evf {
       // find run dir
       boost::filesystem::path runDirectory(
 					   edm::Service<evf::EvFDaqDirector>()->findCurrentRunDir());
-      smpath_ = runDirectory.string();
-      edm::LogInfo("RecoEventOutputModuleForFU") << "Writing .dat files to "
-						 << smpath_;
+      datapath_ = runDirectory.string();
+      LogDebug("RecoEventOutputModuleForFU") << "writing .dat files to -: "
+						 << datapath_;
       // create open dir if not already there
       boost::filesystem::path openPath = runDirectory;
       openPath /= "open";
@@ -57,8 +58,7 @@ namespace evf {
       if (boost::filesystem::is_directory(openPath))
 	foundOpenDir = true;
       if (!foundOpenDir) {
-	std::cout << "<open> FU dir not found. Creating..."
-		  << std::endl;
+	LogDebug("RecoEventOutputModuleForFU") << "<open> FU dir not found. Creating... -:" << openPath.string();
 	boost::filesystem::create_directories(openPath);
       }
     }
@@ -67,14 +67,14 @@ namespace evf {
     std::auto_ptr<Consumer> c_;
     std::string stream_label_;
     std::string events_base_filename_;
-    std::string baseDir_;
-    std::string smpath_;
+    std::string datapath_;
     boost::filesystem::path openDatFilePath_;
     IntJ processed_;
     mutable IntJ accepted_;
     IntJ errorEvents_; 
     IntJ retCodeMask_; 
     StringJ filelist_;
+    IntJ filesize_; 
     StringJ inputFiles_;
     boost::shared_ptr<FastMonitor> jsonMonitor_;
     evf::FastMonitoringService *fms_;
@@ -88,16 +88,15 @@ namespace evf {
     edm::StreamerOutputModuleBase(ps),
     c_(new Consumer(ps)),
     stream_label_(ps.getParameter<std::string>("@module_label")),
-    baseDir_(ps.getUntrackedParameter<std::string>("baseDir","")),
     processed_(0),
     accepted_(0),
     errorEvents_(0),
     retCodeMask_(0),
     filelist_(),
+    filesize_(0),
     inputFiles_()
   {
     initializeStreams();
-    
     fms_ = (evf::FastMonitoringService *)(edm::Service<evf::MicroStateService>().operator->());
     
     processed_.setName("Processed");
@@ -105,6 +104,7 @@ namespace evf {
     errorEvents_.setName("ErrorEvents");
     retCodeMask_.setName("ReturnCodeMask");
     filelist_.setName("Filelist");
+    filesize_.setName("Filesize");
     inputFiles_.setName("InputFiles");
 
     outJsonDef_.setDefaultGroup("data");
@@ -113,15 +113,16 @@ namespace evf {
     outJsonDef_.addLegendItem("ErrorEvents","integer",DataPointDefinition::SUM);
     outJsonDef_.addLegendItem("ReturnCodeMask","integer",DataPointDefinition::BINARYOR);
     outJsonDef_.addLegendItem("Filelist","string",DataPointDefinition::MERGE);
+    outJsonDef_.addLegendItem("Filesize","integer",DataPointDefinition::SUM);
     outJsonDef_.addLegendItem("InputFiles","string",DataPointDefinition::CAT);
     std::stringstream ss;
-    ss << edm::Service<evf::EvFDaqDirector>()->fuBaseDir() << "/" << "output_" << getpid() << ".jsd";
+    ss << edm::Service<evf::EvFDaqDirector>()->baseRunDir() << "/" << "output_" << getpid() << ".jsd";
     std::string outJsonDefName = ss.str();
 
     edm::Service<evf::EvFDaqDirector>()->lockInitLock();
     struct stat   fstat;
     if (stat (outJsonDefName.c_str(), &fstat) != 0) { //file does not exist
-      std::cout << " writing output definition file " << outJsonDefName << std::endl;
+      LogDebug("RecoEventOutputModuleForFU") << "writing output definition file -: " << outJsonDefName;
       std::string content;
       JSONSerializer::serialize(&outJsonDef_,content);
       FileIO::writeStringToFile(outJsonDefName, content);
@@ -135,6 +136,7 @@ namespace evf {
     jsonMonitor_->registerGlobalMonitorable(&errorEvents_,false);
     jsonMonitor_->registerGlobalMonitorable(&retCodeMask_,false);
     jsonMonitor_->registerGlobalMonitorable(&filelist_,false);
+    jsonMonitor_->registerGlobalMonitorable(&filesize_,false);
     jsonMonitor_->registerGlobalMonitorable(&inputFiles_,false);
     jsonMonitor_->commit(nullptr);
   }
@@ -146,30 +148,27 @@ namespace evf {
   void
   RecoEventOutputModuleForFU<Consumer>::start() const
   {
-    std::cout << "RecoEventOutputModuleForFU: start() method " << std::endl;
-    
     const std::string initFileName = edm::Service<evf::EvFDaqDirector>()->getInitFilePath(stream_label_);
-    
-    std::cout << "RecoEventOutputModuleForFU, initializing streams. init stream: " 
-	      << initFileName << std::endl;
-
+    edm::LogInfo("RecoEventOutputModuleForFU") << "start() method, initializing streams. init stream -: "  
+	                                       << initFileName;
     c_->setInitMessageFile(initFileName);
     c_->start();
   }
   
   template<typename Consumer>
   void
-  RecoEventOutputModuleForFU<Consumer>::stop() const {
+  RecoEventOutputModuleForFU<Consumer>::stop() const
+  {
     c_->stop();
   }
 
   template<typename Consumer>
   void
-  RecoEventOutputModuleForFU<Consumer>::doOutputHeader(InitMsgBuilder const& init_message) const {
+  RecoEventOutputModuleForFU<Consumer>::doOutputHeader(InitMsgBuilder const& init_message) const
+  {
     c_->doOutputHeader(init_message);
   }
    
-//______________________________________________________________________________
   template<typename Consumer>
   void
   RecoEventOutputModuleForFU<Consumer>::doOutputEvent(EventMsgBuilder const& msg) const {
@@ -183,28 +182,23 @@ namespace evf {
     edm::ParameterSetDescription desc;
     edm::StreamerOutputModuleBase::fillDescription(desc);
     Consumer::fillDescription(desc);
-    desc.addUntracked<std::string>("baseDir", "")
-        ->setComment("Top level output directory");
     descriptions.add("streamerOutput", desc);
   }
 
-//   template<typename Consumer>
-//   void RecoEventOutputModuleForFU<Consumer>::beginRun(edm::RunPrincipal const &run){
-
-
-//   }
-
   template<typename Consumer>
-  void RecoEventOutputModuleForFU<Consumer>::beginLuminosityBlock(edm::LuminosityBlockPrincipal const &ls, edm::ModuleCallingContext const*){
-    std::cout << "RecoEventOutputModuleForFU : begin lumi " << std::endl;
-	openDatFilePath_ = edm::Service<evf::EvFDaqDirector>()->getOpenDatFilePath(ls.luminosityBlock(),stream_label_);
-	c_->setOutputFile(openDatFilePath_.string());
-	filelist_ = openDatFilePath_.filename().string();
+  void RecoEventOutputModuleForFU<Consumer>::beginLuminosityBlock(edm::LuminosityBlockPrincipal const &ls, edm::ModuleCallingContext const*)
+  {
+    //edm::LogInfo("RecoEventOutputModuleForFU") << "begin lumi";
+    openDatFilePath_ = edm::Service<evf::EvFDaqDirector>()->getOpenDatFilePath(ls.luminosityBlock(),stream_label_);
+    c_->setOutputFile(openDatFilePath_.string());
+    filelist_ = openDatFilePath_.filename().string();
   }
 
   template<typename Consumer>
-  void RecoEventOutputModuleForFU<Consumer>::endLuminosityBlock(edm::LuminosityBlockPrincipal const &ls, edm::ModuleCallingContext const*){
-    std::cout << "RecoEventOutputModuleForFU : end lumi " << std::endl;
+  void RecoEventOutputModuleForFU<Consumer>::endLuminosityBlock(edm::LuminosityBlockPrincipal const &ls, edm::ModuleCallingContext const*)
+  {
+    //edm::LogInfo("RecoEventOutputModuleForFU") << "end lumi";
+    long filesize=0;
     c_->closeOutputFile();
     processed_.value() = fms_->getEventsProcessedForLumi(ls.luminosityBlock());
     if(processed_.value()!=0){
@@ -216,6 +210,7 @@ namespace evf {
       if(des != 0 && src !=0){
 	while((b=fgetc(src))!= EOF){
 	  fputc((unsigned char)b,des);
+          filesize++;
 	}
       }
 
@@ -224,10 +219,11 @@ namespace evf {
     }
     //remove file
     remove(openDatFilePath_.string().c_str());
+    filesize_=filesize;
 
     // output jsn file
     if(processed_.value()!=0){
-	jsonMonitor_->snap(false, "",ls.luminosityBlock());
+	jsonMonitor_->snap(ls.luminosityBlock());
 	const std::string outputJsonNameStream =
 	  edm::Service<evf::EvFDaqDirector>()->getOutputJsonFilePath(ls.luminosityBlock(),stream_label_);
 	jsonMonitor_->outputFullJSON(outputJsonNameStream,ls.luminosityBlock());
