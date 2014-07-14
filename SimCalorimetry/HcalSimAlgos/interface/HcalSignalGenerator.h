@@ -13,6 +13,7 @@
 #include "SimCalorimetry/HcalSimAlgos/interface/HcalElectronicsSim.h"
 #include "SimCalorimetry/HcalSimAlgos/interface/HcalDigitizerTraits.h"
 #include "DataFormats/Common/interface/Handle.h"
+#include "DataFormats/HcalDetId/interface/HcalSubdetector.h"
 
 /** Converts digis back into analog signals, to be used
  *  as noise 
@@ -57,6 +58,7 @@ public:
 
   virtual void fill(edm::ModuleCallingContext const* mcc)
   {
+
     theNoiseSignals.clear();
     edm::Handle<COLLECTION> pDigis;
     const COLLECTION *  digis = 0;
@@ -96,27 +98,66 @@ public:
         {
           int startingCapId = (*it)[0].capid();
           theElectronicsSim->setStartingCapId(startingCapId);
-          theParameterMap->setFrameSize(it->id(), it->size());
+          // theParameterMap->setFrameSize(it->id(), it->size()); //don't need this
         }
-
-        theNoiseSignals.push_back(samplesInPE(*it));
+	if(validDigi(*it)) {
+	  theNoiseSignals.push_back(samplesInPE(*it));
+	}
       }
     }
   }
 
 private:
 
+  bool validDigi(const DIGI & digi)
+  {
+    int DigiSum = 0;
+    for(int id = 0; id<digi.size(); id++) {
+      if(digi[id].adc() > 0) ++DigiSum;
+    }
+    return(DigiSum>0);
+  }
+
   CaloSamples samplesInPE(const DIGI & digi)
   {
+
     // calibration, for future reference:  (same block for all Hcal types)
     HcalDetId cell = digi.id();
-    //         const HcalCalibrations& calibrations=conditions->getHcalCalibrations(cell);
-    const HcalQIECoder* channelCoder = theConditions->getHcalCoder (cell);
-    const HcalQIEShape* channelShape = theConditions->getHcalShape (cell);
-    HcalCoderDb coder (*channelCoder, *channelShape);
-    CaloSamples result;
-    coder.adc2fC(digi, result);
+
+    CaloSamples result = CaloSamples(digi.id(),digi.size());
+
+    // first, check if there was an overflow in this fake digi:
+    bool overflow = false;
+    // find and list them
+
+    for(int isample=0; isample<digi.size(); ++isample) {
+      if(digi[isample].er()) overflow = true; 
+    }
+
+    if(overflow) {  // do full conversion, go back and overwrite fake entries
+
+      const HcalQIECoder* channelCoder = theConditions->getHcalCoder (cell);
+      const HcalQIEShape* channelShape = theConditions->getHcalShape (cell);
+      HcalCoderDb coder (*channelCoder, *channelShape);
+      coder.adc2fC(digi, result);
+
+      // overwrite with coded information
+      for(int isample=0; isample<digi.size(); ++isample) {
+        if(!digi[isample].er()) result[isample] = float(digi[isample].adc())/10.;
+      }
+    }
+    else {  // saves creating the coder, etc., every time
+      // use coded information
+      for(int isample=0; isample<digi.size(); ++isample) {
+        result[isample] = float(digi[isample].adc())/10.;
+      }
+      result.setPresamples(digi.presamples());
+    }
+    
+    // translation done in fC, convert to pe:
+
     fC2pe(result);
+
     return result;
   }
 
