@@ -46,6 +46,8 @@ class HPSPFRecoTauAlgorithm : public PFRecoTauAlgorithmBase
   void buildOneProngStrip(const reco::PFTauTagInfoRef&,const std::vector<std::vector<reco::PFCandidatePtr>>&,const std::vector<reco::PFCandidatePtr>&);
   void buildOneProngTwoStrips(const reco::PFTauTagInfoRef&,const std::vector<std::vector<reco::PFCandidatePtr>>&,const std::vector<reco::PFCandidatePtr>&);
   void buildThreeProngs(const reco::PFTauTagInfoRef&,const std::vector<reco::PFCandidatePtr>&);
+  void buildThreeProngStrip(const reco::PFTauTagInfoRef&,const std::vector<std::vector<reco::PFCandidatePtr>>&,const std::vector<reco::PFCandidatePtr>&);
+  void buildThreeProngTwoStrips(const reco::PFTauTagInfoRef&,const std::vector<std::vector<reco::PFCandidatePtr>>&,const std::vector<reco::PFCandidatePtr>&);
 
   //Narrowness selection
   bool isNarrowTau(const reco::PFTau&,double);
@@ -85,6 +87,8 @@ class HPSPFRecoTauAlgorithm : public PFRecoTauAlgorithmBase
   bool doOneProngStrips_;
   bool doOneProngTwoStrips_;
   bool doThreeProngs_;
+  bool doThreeProngStrips_;
+  bool doThreeProngTwoStrips_;
 
 
   //Minimum Tau Pt for the reconstruction
@@ -107,6 +111,9 @@ class HPSPFRecoTauAlgorithm : public PFRecoTauAlgorithmBase
   std::vector<double> oneProngTwoStripsMassWindow_;
   std::vector<double> oneProngTwoStripsPi0MassWindow_;
   std::vector<double> threeProngMassWindow_;
+  std::vector<double> threeProngStripMassWindow_; // todo: define mass window in python config
+  std::vector<double> threeProngTwoStripsMassWindow_; // todo: define mass window in python config
+  std::vector<double> threeProngTwoStripsPi0MassWindow_; // todo: define mass window in python config
 
   //Matching Cone between PFTau , PFJet 
   double matchingCone_;

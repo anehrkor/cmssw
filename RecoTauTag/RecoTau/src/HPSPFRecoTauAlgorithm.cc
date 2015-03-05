@@ -53,6 +53,14 @@ HPSPFRecoTauAlgorithm::buildPFTau(const PFTauTagInfoRef& tagInfo,const Vertex& v
   if(doThreeProngs_)
     buildThreeProngs(tagInfo,hadrons);
 
+  //Three Prong Strips
+  if(doThreeProngStrips_)
+	buildThreeProngStrip(tagInfo,strips,hadrons);
+
+  //Three Prong TwoStrips
+  if(doThreeProngTwoStrips_)
+	buildThreeProngTwoStrips(tagInfo,strips,hadrons);
+
 
   //Lets see if we created any taus
   if(pfTaus_.size()>0) {
@@ -428,6 +436,270 @@ HPSPFRecoTauAlgorithm::buildThreeProngs(const reco::PFTauTagInfoRef& tagInfo,con
 
 }
 
+void
+HPSPFRecoTauAlgorithm::buildThreeProngStrip(const reco::PFTauTagInfoRef& tagInfo,const  std::vector<std::vector<PFCandidatePtr> >& strips,const std::vector<reco::PFCandidatePtr>& hadrons)
+{
+	//Create output Collection
+	PFTauCollection taus;
+
+	//Require at least 3 hadrons and 1 strip
+	if(hadrons.size()>2 && strips.size()>0){
+		//Combinatorics between strips and clusters
+		for(std::vector<std::vector<PFCandidatePtr>>::const_iterator candVector=strips.begin();candVector!=strips.end();++candVector){
+			for(std::vector<PFCandidatePtr>::const_iterator h1=hadrons.begin();h1!=hadrons.end()-2;++h1){
+				for(std::vector<PFCandidatePtr>::const_iterator h2=hadrons.begin()+1;h2!=hadrons.end()-1;++h2){
+					for(std::vector<PFCandidatePtr>::const_iterator h3=hadrons.begin()+2;h3!=hadrons.end();++h3){
+
+						//First Cross cleaning ! If you asked to clusterize the candidates
+						//with tracks too then you should not double count the track
+						std::vector<PFCandidatePtr> emConstituents = *candVector;
+						removeCandidateFromRefVector(*h1,emConstituents);
+						removeCandidateFromRefVector(*h2,emConstituents);
+						removeCandidateFromRefVector(*h3,emConstituents);
+
+						//Create a LorentzVector for the strip
+						math::XYZTLorentzVector strip = createMergedLorentzVector(emConstituents);
+						//TEST: Apply Strip Constraint
+						applyMassConstraint(strip,0.1349);
+
+						int charge = (*h1)->charge() + (*h2)->charge() + (*h3)->charge();
+						if(abs(charge) == 1 && (*h1)->pt() > leadPionThreshold_){
+							//check the track refs
+							if((*h1)->trackRef() != (*h2)->trackRef() && (*h1)->trackRef() != (*h3)->trackRef() && (*h2)->trackRef() != (*h3)->trackRef()){
+
+								//create the tau
+								PFTau tau = PFTau(charge,(*h1)->p4()+(*h2)->p4()+(*h3)->p4()+strip,(*h1)->vertex());
+								tau.setpfTauTagInfoRef(tagInfo);
+
+								//check pt thresholds and matching cone
+								if(tau.pt() > tauThreshold_ && strip.pt() > stripPtThreshold_){
+									if(ROOT::Math::VectorUtil::DeltaR(tau.p4(),tagInfo->pfjetRef()->p4()) < matchingCone_){
+										//create the signal vectors
+										std::vector<PFCandidatePtr> signal;
+										std::vector<PFCandidatePtr> signalH;
+										std::vector<PFCandidatePtr> signalG;
+
+										//store charged hadrons from PFTau
+										signal.push_back(*h1);
+										signal.push_back(*h2);
+										signal.push_back(*h3);
+										signalH.push_back(*h1);
+										signalH.push_back(*h2);
+										signalH.push_back(*h3);
+
+										//store strip constituent(s) from PFTau
+										if(emConstituents.size() > 0){
+											for(std::vector<PFCandidatePtr>::const_iterator emConstituent=emConstituents.begin();emConstituent!=emConstituents.end();++emConstituent){
+												signal.push_back(*emConstituent);
+												signalG.push_back(*emConstituent);
+											}
+										}
+
+										//set the PFTau
+										tau.setsignalPFChargedHadrCands(signalH);
+										tau.setsignalPFGammaCands(signalG);
+										tau.setsignalPFCands(signal);
+										tau.setleadPFChargedHadrCand(*h1);
+										tau.setleadPFNeutralCand(emConstituents[0]);
+										if((*h1)->pt() > emConstituents[0]->pt())
+											tau.setleadPFCand(*h1);
+										else
+											tau.setleadPFCand(emConstituents[0]);
+
+										//calculate the cone size : For the strip use it as one candidate !
+										double tauCone=0.0;
+										if(coneMetric_ == "DR"){
+											tauCone = std::max(ROOT::Math::VectorUtil::DeltaR(tau.p4(),(*h1)->p4()),
+													std::max(ROOT::Math::VectorUtil::DeltaR(tau.p4(),(*h2)->p4()),
+															std::max(ROOT::Math::VectorUtil::DeltaR(tau.p4(),(*h3)->p4()),
+																	ROOT::Math::VectorUtil::DeltaR(tau.p4(),strip))));
+										}else if(coneMetric_ == "angle"){
+											tauCone = std::max(fabs(ROOT::Math::VectorUtil::Angle(tau.p4(),(*h1)->p4())),
+													std::max(fabs(ROOT::Math::VectorUtil::Angle(tau.p4(),(*h2)->p4())),
+															std::max(fabs(ROOT::Math::VectorUtil::Angle(tau.p4(),(*h3)->p4())),
+																	fabs(ROOT::Math::VectorUtil::Angle(tau.p4(),strip)))));
+										}
+
+										if(isNarrowTau(tau,tauCone)){
+											//calculate the isolation deposits
+											associateIsolationCandidates(tau,tauCone);
+											applyMuonRejection(tau);
+											applyElectronRejection(tau,strip.energy());
+
+											taus.push_back(tau);
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if(taus.size() > 0){
+		PFTau bestTau = getBestTauCandidate(taus);
+		if(refitThreeProng(bestTau)){
+			//we need to re-add the strip p4 to the tau after the fit
+			math::XYZTLorentzVector strip = createMergedLorentzVector(bestTau.signalPFGammaCands());
+			applyMassConstraint(strip,0.1349);
+			bestTau.setP4(bestTau.p4() + strip);
+			//apply mass constraint
+			if(bestTau.mass() > threeProngStripMassWindow_[0] && bestTau.mass() < threeProngStripMassWindow_[1]){
+				pfTaus_.push_back(bestTau);
+			}
+		}
+	}
+}
+
+void
+HPSPFRecoTauAlgorithm::buildThreeProngTwoStrips(const reco::PFTauTagInfoRef& tagInfo,const  std::vector<std::vector<PFCandidatePtr> >& strips,const std::vector<reco::PFCandidatePtr>& hadrons)
+{
+	//Create output Collection
+	PFTauCollection taus;
+
+	//Require at least 3 hadrons and 2 strips
+	if(hadrons.size()>2 && strips.size()>1){
+		//Combinatorics between strips and clusters
+		for(std::vector<std::vector<PFCandidatePtr>>::const_iterator s1=strips.begin();s1!=strips.end()-1;++s1){
+			for(std::vector<std::vector<PFCandidatePtr>>::const_iterator s2=strips.begin()+1;s2!=strips.end();++s2){
+				for(std::vector<PFCandidatePtr>::const_iterator h1=hadrons.begin();h1!=hadrons.end()-2;++h1){
+					for(std::vector<PFCandidatePtr>::const_iterator h2=hadrons.begin()+1;h2!=hadrons.end()-1;++h2){
+						for(std::vector<PFCandidatePtr>::const_iterator h3=hadrons.begin()+2;h3!=hadrons.end();++h3){
+
+							//First Cross cleaning ! If you asked to clusterize the candidates
+							//with tracks too then you should not double count the track
+							std::vector<PFCandidatePtr> emConstituents1 = *s1;
+							std::vector<PFCandidatePtr> emConstituents2 = *s2;
+							removeCandidateFromRefVector(*h1,emConstituents1);
+							removeCandidateFromRefVector(*h2,emConstituents1);
+							removeCandidateFromRefVector(*h3,emConstituents1);
+							removeCandidateFromRefVector(*h1,emConstituents2);
+							removeCandidateFromRefVector(*h2,emConstituents2);
+							removeCandidateFromRefVector(*h3,emConstituents2);
+
+							//Create a LorentzVector for the strip
+							math::XYZTLorentzVector strip1 = createMergedLorentzVector(emConstituents1);
+							math::XYZTLorentzVector strip2 = createMergedLorentzVector(emConstituents2);
+
+							//Apply Mass Constraints
+							applyMassConstraint(strip1,0.0);
+							applyMassConstraint(strip2,0.0);
+
+							int charge = (*h1)->charge() + (*h2)->charge() + (*h3)->charge();
+							if(abs(charge) == 1 && (*h1)->pt() > leadPionThreshold_){
+								//check the track refs
+								if((*h1)->trackRef() != (*h2)->trackRef() && (*h1)->trackRef() != (*h3)->trackRef() && (*h2)->trackRef() != (*h3)->trackRef()){
+
+									//create the tau
+									PFTau tau = PFTau(charge,(*h1)->p4()+(*h2)->p4()+(*h3)->p4()+strip1+strip2,(*h1)->vertex());
+									tau.setpfTauTagInfoRef(tagInfo);
+
+									//check pt thresholds and matching cone
+									if(tau.pt() > tauThreshold_ && strip1.pt() > stripPtThreshold_ && strip2.pt() > stripPtThreshold_){
+										if((strip1+strip2).M() > threeProngTwoStripsPi0MassWindow_[0] && (strip1+strip2).M() < threeProngTwoStripsPi0MassWindow_[1]){
+											if(ROOT::Math::VectorUtil::DeltaR(tau.p4(),tagInfo->pfjetRef()->p4()) < matchingCone_){
+												//create the signal vectors
+												std::vector<PFCandidatePtr> signal;
+												std::vector<PFCandidatePtr> signalH;
+												std::vector<PFCandidatePtr> signalG;
+
+												//store charged hadrons from PFTau
+												signal.push_back(*h1);
+												signal.push_back(*h2);
+												signal.push_back(*h3);
+												signalH.push_back(*h1);
+												signalH.push_back(*h2);
+												signalH.push_back(*h3);
+
+												//store strip constituent(s) from PFTau
+												if(emConstituents1.size() > 0){
+													for(std::vector<PFCandidatePtr>::const_iterator emConstituent=emConstituents1.begin();emConstituent!=emConstituents1.end();++emConstituent){
+														signal.push_back(*emConstituent);
+														signalG.push_back(*emConstituent);
+													}
+												}
+
+												if(emConstituents2.size() > 0){
+													for(std::vector<PFCandidatePtr>::const_iterator emConstituent=emConstituents2.begin();emConstituent!=emConstituents2.end();++emConstituent){
+														signal.push_back(*emConstituent);
+														signalG.push_back(*emConstituent);
+													}
+												}
+
+												//set the PFTau
+												tau.setsignalPFChargedHadrCands(signalH);
+												tau.setsignalPFGammaCands(signalG);
+												tau.setsignalPFCands(signal);
+												tau.setleadPFChargedHadrCand(*h1);
+
+												if((*h1)->pt() > emConstituents1[0]->pt())
+													tau.setleadPFCand(*h1);
+												else
+													tau.setleadPFCand(emConstituents1[0]);
+
+												//calculate the cone size : For the strip use it as one candidate !
+												double tauCone=0.0;
+												if(coneMetric_ == "DR"){
+													tauCone = std::max(ROOT::Math::VectorUtil::DeltaR(tau.p4(),(*h1)->p4()),
+															  std::max(ROOT::Math::VectorUtil::DeltaR(tau.p4(),(*h2)->p4()),
+															  std::max(ROOT::Math::VectorUtil::DeltaR(tau.p4(),(*h3)->p4()),
+																	   ROOT::Math::VectorUtil::DeltaR(tau.p4(),strip1))));
+												}else if(coneMetric_ == "angle"){
+													tauCone = std::max(fabs(ROOT::Math::VectorUtil::Angle(tau.p4(),(*h1)->p4())),
+															  std::max(fabs(ROOT::Math::VectorUtil::Angle(tau.p4(),(*h2)->p4())),
+															  std::max(fabs(ROOT::Math::VectorUtil::Angle(tau.p4(),(*h3)->p4())),
+																	   fabs(ROOT::Math::VectorUtil::Angle(tau.p4(),strip1)))));
+												}
+
+												if(isNarrowTau(tau,tauCone)){
+													//calculate the isolation deposits
+													associateIsolationCandidates(tau,tauCone);
+													applyMuonRejection(tau);
+
+													//For two strips take the nearest strip to any of the tracks
+													double strip1DR = std::min(ROOT::Math::VectorUtil::DeltaR(strip1,(*h1)->p4()),
+																	  std::min(ROOT::Math::VectorUtil::DeltaR(strip1,(*h2)->p4()),
+																			   ROOT::Math::VectorUtil::DeltaR(strip1,(*h3)->p4())));
+													double strip2DR = std::min(ROOT::Math::VectorUtil::DeltaR(strip1,(*h1)->p4()),
+															  	  	  std::min(ROOT::Math::VectorUtil::DeltaR(strip1,(*h2)->p4()),
+															  	  			   ROOT::Math::VectorUtil::DeltaR(strip1,(*h3)->p4())));
+
+													if(strip1DR < strip2DR){
+														applyElectronRejection(tau,strip1.energy());
+													}else{
+														applyElectronRejection(tau,strip2.energy());
+													}
+
+													taus.push_back(tau);
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if(taus.size() > 0){
+		PFTau bestTau = getBestTauCandidate(taus);
+		if(refitThreeProng(bestTau)){
+			//we need to re-add the strips p4's to the tau after the fit
+			math::XYZTLorentzVector strip = createMergedLorentzVector(bestTau.signalPFGammaCands());
+			applyMassConstraint(strip,0.0);
+			bestTau.setP4(bestTau.p4() + strip);
+			//apply mass constraint
+			if(bestTau.mass() > threeProngTwoStripsMassWindow_[0] && bestTau.mass() < threeProngTwoStripsMassWindow_[1]){
+				pfTaus_.push_back(bestTau);
+			}
+		}
+	}
+}
 
 bool
 HPSPFRecoTauAlgorithm::isNarrowTau(const reco::PFTau& tau,double cone)
@@ -637,6 +909,8 @@ HPSPFRecoTauAlgorithm::configure(const edm::ParameterSet& p)
   doOneProngStrips_              = p.getParameter<bool>("doOneProngStrip");
   doOneProngTwoStrips_           = p.getParameter<bool>("doOneProngTwoStrips");
   doThreeProngs_                 = p.getParameter<bool>("doThreeProng");
+  doThreeProngStrips_            = p.getParameter<bool>("doThreeProngStrip");
+  doThreeProngTwoStrips_         = p.getParameter<bool>("doThreeProngTwoStrips");
   tauThreshold_                  = p.getParameter<double>("tauPtThreshold");
   leadPionThreshold_             = p.getParameter<double>("leadPionThreshold");
   stripPtThreshold_               = p.getParameter<double>("stripPtThreshold");
@@ -648,6 +922,9 @@ HPSPFRecoTauAlgorithm::configure(const edm::ParameterSet& p)
   oneProngTwoStripsMassWindow_   = p.getParameter<std::vector<double> >("oneProngTwoStripsMassWindow");
   oneProngTwoStripsPi0MassWindow_= p.getParameter<std::vector<double> >("oneProngTwoStripsPi0MassWindow");
   threeProngMassWindow_          = p.getParameter<std::vector<double> >("threeProngMassWindow");
+  threeProngStripMassWindow_     = p.getParameter<std::vector<double> >("threeProngStripMassWindow");
+  threeProngTwoStripsMassWindow_ = p.getParameter<std::vector<double> >("threeProngTwoStripsMassWindow");
+  threeProngTwoStripsPi0MassWindow_ = p.getParameter<std::vector<double> >("threeProngTwoStripsPi0MassWindow");
   matchingCone_                  = p.getParameter<double>("matchingCone");
   coneMetric_                    = p.getParameter<std::string>("coneMetric");
   coneSizeFormula_               = p.getParameter<std::string>("coneSizeFormula");
@@ -666,8 +943,16 @@ HPSPFRecoTauAlgorithm::configure(const edm::ParameterSet& p)
     throw cms::Exception("") << "OneProngStripMassWindow must be a vector of size 2 [min,max] " << std::endl;
   if(oneProngTwoStripsMassWindow_.size()!=2)
     throw cms::Exception("") << "OneProngTwoStripsMassWindow must be a vector of size 2 [min,max] " << std::endl;
+  if(oneProngTwoStripsPi0MassWindow_.size()!=2)
+	throw cms::Exception("") << "OneProngTwoStripsPi0MassWindow must be a vector of size 2 [min,max] " << std::endl;
   if(threeProngMassWindow_.size()!=2)
     throw cms::Exception("") << "ThreeProngMassWindow must be a vector of size 2 [min,max] " << std::endl;
+  if(threeProngStripMassWindow_.size()!=2)
+	throw cms::Exception("") << "ThreeProngStripMassWindow must be a vector of size 2 [min,max] " << std::endl;
+  if(threeProngTwoStripsMassWindow_.size()!=2)
+	throw cms::Exception("") << "ThreeProngTwoStripsMassWindow must be a vector of size 2 [min,max] " << std::endl;
+  if(threeProngTwoStripsPi0MassWindow_.size()!=2)
+	throw cms::Exception("") << "ThreeProngTwoStripsPi0MassWindow must be a vector of size 2 [min,max] " << std::endl;
   if(coneMetric_!= "angle" && coneMetric_ != "DR")
     throw cms::Exception("") << "Cone Metric should be angle or DR " << std::endl;
 

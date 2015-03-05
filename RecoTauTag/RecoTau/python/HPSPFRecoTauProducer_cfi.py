@@ -28,6 +28,8 @@ hpsPFRecoTauProducer = pfRecoTauProducer.clone(
       doOneProngStrip        = cms.bool(True),
       doOneProngTwoStrips    = cms.bool(True),
       doThreeProng           = cms.bool(True),
+      doThreeProngStrip      = cms.bool(True),
+      doThreeProngTwoStrips  = cms.bool(True),
 
       #Minimum Pt for the tau
       tauPtThreshold         = cms.double(15.),
@@ -50,6 +52,9 @@ hpsPFRecoTauProducer = pfRecoTauProducer.clone(
       oneProngTwoStripsMassWindow = cms.vdouble(0.4,1.2),
       oneProngTwoStripsPi0MassWindow = cms.vdouble(0.05,0.2),
       threeProngMassWindow = cms.vdouble(0.8,1.5),
+      #threeProngStripMassWindow = cms.vdouble(),# todo: implement mass window
+      #threeProngTwoStripsMassWindow = cms.vdouble(),# todo: implement mass window
+      #threeProngTwoStripsPi0MassWindow = cms.vdouble(),# todo: implement mass window
       #Matching cone for the taus
       matchingCone= cms.double(0.1),
       #Add converted electrons to the Tau LV
