@@ -10,8 +10,12 @@
  * \author Alexander Nehrkorn, RWTH Aachen
  */
 
-// todo 1: add python config file for this class
-// todo 2: do we need to add PATTauIDEmbedder?
+// todo 1: remove leadingTrackChi2 as input variable from:
+//           - here
+//           - TauPFEssential
+//           - PFRecoTauDiscriminationByMVAIsolationRun2
+//           - Training of BDT
+// todo 2: do we need/want to add PATTauIDEmbedder?
 
 #include "RecoTauTag/RecoTau/interface/TauDiscriminationProducerBase.h"
 
@@ -44,7 +48,7 @@ namespace
 {
 	const GBRForest* loadMVAfromFile(const edm::FileInPath& inputFileName, const std::string& mvaName, std::vector<TFile*>& inputFilesToDelete)
 	{
-	  if ( inputFileName.location() == edm::FileInPath::Unknown ) throw cms::Exception("PFRecoTauDiscriminationByIsolationMVA2::loadMVA") 
+	  if ( inputFileName.location() == edm::FileInPath::Unknown ) throw cms::Exception("PATTauDiscriminationByIsolationMVARun2::loadMVA")
 		<< " Failed to find File = " << inputFileName << " !!\n";
 	  TFile* inputFile = new TFile(inputFileName.fullPath().data());
 	
@@ -102,6 +106,8 @@ class PATTauDiscriminationByMVAIsolationRun2 : public PATTauDiscriminationProduc
 			      mvaOpt_ == kPWoldDMwLT || mvaOpt_ == kPWnewDMwLT) mvaInput_ = new float[23];
 		    else assert(0);
 		    
+		    requireDecayMode_ = cfg.exists("requireDecayMode") ? cfg.getParameter<bool>("requireDecayMode") : false;
+
 		    chargedIsoPtSum_ = cfg.getParameter<std::string>("srcChargedIsoPtSum");
 		    neutralIsoPtSum_ = cfg.getParameter<std::string>("srcNeutralIsoPtSum");
 		    puCorrPtSum_ = cfg.getParameter<std::string>("srcPUcorrPtSum");
@@ -141,6 +147,7 @@ class PATTauDiscriminationByMVAIsolationRun2 : public PATTauDiscriminationProduc
 		enum { kOldDMwoLT, kOldDMwLT, kNewDMwoLT, kNewDMwLT, kDBoldDMwLT, kDBnewDMwLT, kPWoldDMwLT, kPWnewDMwLT };
 		int mvaOpt_;
 		float* mvaInput_;
+		bool requireDecayMode_;
 		
 		edm::Handle<TauCollection> taus_;
 		std::auto_ptr<PATTauDiscriminator> category_output_;
@@ -179,16 +186,18 @@ double PATTauDiscriminationByMVAIsolationRun2::discriminate(const TauRef& tau) c
 	// CV: computation of MVA value requires presence of leading charged hadron
 	if ( tau->leadChargedHadrCand().isNull() ) return 0.;
 	
+	if ( requireDecayMode_ && tau->tauID("decayModeFindingNewDMs") < 0.5 ) return 0.;
+
 	int tauDecayMode = tau->decayMode();
 	
 	if ( ((mvaOpt_ == kOldDMwoLT || mvaOpt_ == kOldDMwLT || mvaOpt_ == kDBoldDMwLT || mvaOpt_ == kPWoldDMwLT) && (tauDecayMode == 0 || tauDecayMode == 1 || tauDecayMode == 2 || tauDecayMode == 10)) ||
 	   ((mvaOpt_ == kNewDMwoLT || mvaOpt_ == kNewDMwLT || mvaOpt_ == kDBnewDMwLT || mvaOpt_ == kPWnewDMwLT) && (tauDecayMode == 0 || tauDecayMode == 1 || tauDecayMode == 2 || tauDecayMode == 5 || tauDecayMode == 6 || tauDecayMode == 10)) ) {
 	
-		float chargedIsoPtSum = tau->tauID("chargedIsoPtSum");
-		float neutralIsoPtSum = tau->tauID("neutralIsoPtSum");
-		float puCorrPtSum     = tau->tauID("puCorrPtSum");
-		float photonPtSumOutsideSignalCone = tau->tauID("photonPtSumOutsideSignalCone");
-		float footprintCorrection = tau->tauID("footprintCorrection");
+		float chargedIsoPtSum = tau->tauID(chargedIsoPtSum_);
+		float neutralIsoPtSum = tau->tauID(neutralIsoPtSum_);
+		float puCorrPtSum     = tau->tauID(puCorrPtSum_);
+		float photonPtSumOutsideSignalCone = tau->tauID(photonPtSumOutsideSignalCone_);
+		float footprintCorrection = tau->tauID(footprintCorrection_);
 		
 		float decayDistX = tau->flightLength().x();
 		float decayDistY = tau->flightLength().y();
